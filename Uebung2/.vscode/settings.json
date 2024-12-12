@@ -1,0 +1,15 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.adapterTargetName": "esp32c3",
+  "idf.openOcdConfigs": [
+    "board/esp32c3-builtin.cfg"
+  ],
+  "idf.flashType": "UART",
+  "files.associations": {
+    "gpio.h": "c",
+    "sdkconfig.h": "c",
+    "esp_intr_alloc.h": "c",
+    "freertos.h": "c"
+  },
+  "idf.portWin": "COM3"
+}

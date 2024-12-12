@@ -1,0 +1,84 @@
+menu "Example Configuration"
+
+    orsource "$IDF_PATH/examples/common_components/env_caps/$IDF_TARGET/Kconfig.env_caps"
+
+    choice BLINK_LED
+        prompt "Blink LED type"
+        default BLINK_LED_GPIO
+        help
+            Select the LED type. A normal level controlled LED or an addressable LED strip.
+            The default selection is based on the Espressif DevKit boards.
+            You can change the default selection according to your board.
+
+        config BLINK_LED_GPIO
+            bool "GPIO"
+        config BLINK_LED_STRIP
+            bool "LED strip"
+    endchoice
+
+    choice BLINK_LED_STRIP_BACKEND
+        depends on BLINK_LED_STRIP
+        prompt "LED strip backend peripheral"
+        default BLINK_LED_STRIP_BACKEND_RMT if SOC_RMT_SUPPORTED
+        default BLINK_LED_STRIP_BACKEND_SPI
+        help
+            Select the backend peripheral to drive the LED strip.
+
+        config BLINK_LED_STRIP_BACKEND_RMT
+            depends on SOC_RMT_SUPPORTED
+            bool "RMT"
+        config BLINK_LED_STRIP_BACKEND_SPI
+            bool "SPI"
+    endchoice
+
+    config BLINK_GPIO
+        int "Blink GPIO number"
+        range ENV_GPIO_RANGE_MIN ENV_GPIO_OUT_RANGE_MAX
+        default 8
+        help
+            GPIO number (IOxx) to blink on and off the LED.
+            Some GPIOs are used for other purposes (flash connections, etc.) and cannot be used to blink.
+
+    config BLINK_PERIOD
+        int "Blink period in ms"
+        range 10 3600000
+        default 1000
+        help
+            Define the blinking period in milliseconds.
+
+
+
+
+    config BUTTON_GPIO_LEFT
+        int "Button GPIO"
+        default 9
+        help
+            GPIO the Button is connected to. In the book it is 6, the book development board uses 9
+
+    config BUTTON_GPIO_RIGHT
+        int "Button GPIO"
+        default 2
+        help
+            GPIO the Button is connected to. The book development board uses 2
+
+
+
+
+    config I2C_MASTER_SCL_IO
+        int "I2C master SCL I/O"
+        default 6
+        help
+            I/O (pin) of used I2C SCL line.
+
+    config I2C_MASTER_SDA_IO
+        int "I2C master SDA I/O"
+        default 5
+        help
+            I/O (pin) of used I2C SDA line.
+
+    config I2C_MASTER_BITRATE
+        int "I2C master bit rate"
+        default 400000
+        help
+            bit rate (i.e. clock of Hz) of the I2C module.
+endmenu
