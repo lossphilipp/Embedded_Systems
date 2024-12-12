@@ -12,10 +12,7 @@
     "freertos.h": "c",
     "bitset": "c",
     "algorithm": "c",
-    "format": "c",
-    "spi_master.h": "c",
-    "string_view": "c",
-    "regex": "c"
+    "format": "c"
   },
   "idf.portWin": "COM3"
 }
