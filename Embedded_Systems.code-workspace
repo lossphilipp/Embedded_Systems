@@ -1,0 +1,26 @@
+{
+    "folders": [
+        {
+            "path": "./Uebung1-LED"
+        },
+        {
+            "path": "./Uebung2-Game"
+        },
+        {
+            "path": "./Uebung3-esp_random"
+        },
+        {
+            "path": "./Uebung4-DigitalEggWatch"
+        },
+        {
+            "path": "./Uebung5-I2C_TemperatureSensor"
+        },
+        {
+            "path": "./Uebung6-SPI_Gyroscope"
+        },
+        {
+            "path": "./Uebung7-Interupt_Game"
+        }
+    ],
+    "settings": {}
+}
