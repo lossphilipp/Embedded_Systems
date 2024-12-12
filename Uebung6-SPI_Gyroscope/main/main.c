@@ -18,8 +18,7 @@
 
 
 #define GYRO_SPI_REG 0x80
-#define GYRO_SPI_WHOAMI_READ 0x75 | GYRO_SPI_REG
-#define GYRO_SPI_WHOAMI_RESPONSE 0xFF
+#define GYRO_SPI_MSB_CLEAR 0x7F
 
 #define GYRO_SPI_ACCEL_XOUT_H 0x1F | GYRO_SPI_REG
 #define GYRO_SPI_ACCEL_XOUT_L 0x20 | GYRO_SPI_REG
@@ -84,9 +83,15 @@ static void configure_led(void)
 #error "unsupported LED type"
 #endif
 
-#ifdef GYRO_SPI_WHOAMI_READ
+#ifdef GYRO_SPI_REG
 static spi_device_interface_config_t spiDeviceConfig = { 0 };
 static spi_device_handle_t spiDeviceHandle;
+
+bool changes[10] = {false, false, false, false, false, false, false, false, false, false};
+uint8_t curr_change_index = 0;
+
+uint16_t accel_threshold = 1000;
+uint16_t rolling_threshold = 4;
 
 static void initSPI(spi_host_device_t spiHost) {
     spi_bus_config_t bus_cfg = {
@@ -135,7 +140,7 @@ uint8_t* gyroscop_read(uint8_t command)
     uint8_t rcv[16];
     memset(&rcv[0], 0xCC, 16);
 
-    spiTransaction.length = 8 * 16;
+    spiTransaction.length = 8 * 2; // 8 bit send, 8 bit receive, only the register
     spiTransaction.rxlength = 0;
     spiTransaction.flags = 0; // SPI_TRANS_CS_KEEP_ACTIVE;
     spiTransaction.tx_buffer = &cmd;
@@ -144,19 +149,41 @@ uint8_t* gyroscop_read(uint8_t command)
     esp_err_t ret = spi_device_transmit(spiDeviceHandle, &spiTransaction);
     if (ret == ESP_OK) {
         ESP_LOGD("GYRO", "got data from gyro: %X %X", rcv[0], rcv[1]);
-        return rcv;
+        return rcv[1];
     } else {
         ESP_LOGE("GYRO", "SPI transmission failed!");
         return ESP_FAIL;
     }
 }
 
-void gyroscope_whoami()
+esp_err_t write_register(uint8_t reg, uint8_t value) {
+    spi_transaction_t spiTransaction = { 0 };
+
+    uint8_t cmd[2];
+    cmd[0] = reg & GYRO_SPI_MSB_CLEAR;
+    cmd[1] = value;
+
+    spiTransaction.length = 8 * 2;
+    spiTransaction.tx_buffer = cmd;
+    spiTransaction.rx_buffer = NULL;
+
+    // Transmit the SPI transaction
+    esp_err_t ret = spi_device_transmit(spiDeviceHandle, &spiTransaction);
+    if (ret != ESP_OK) {
+        ESP_LOGE("GYRO", "SPI write failed: %d\n", ret);
+        return ret;
+    }
+
+    ESP_LOGD("GYRO", "Wrote 0x%02X to register 0x%02X\n", value, reg);
+    return ESP_OK;
+}
+
+bool gyroscope_whoami()
 {
     spi_transaction_t spiTransaction = { 0 };
     uint8_t cmd[16];
-    cmd[0] = GYRO_SPI_WHOAMI_READ; //0x75 | 0x80; // WHO AM I, Read
-    cmd[1] = GYRO_SPI_WHOAMI_RESPONSE; //0xFF; // second byte, for response transmit
+    cmd[0] = 0x75 | 0x80; // WHO AM I, Read
+    cmd[1] = 0xFF; // second byte, for response transmit
     uint8_t rcv[16];
     rcv[0] = 0xCC;
     rcv[1] = 0xCC;
@@ -170,6 +197,7 @@ void gyroscope_whoami()
         ESP_LOGI("WHOAMI", "got data from ICM42688: %X %X", rcv[0], rcv[1]);
         if (rcv[1] == 0x47) { // see datasheet
             ESP_LOGI("WHOAMI", "gyro responds, ID ok");
+            return true;
         } else {
             ESP_LOGE("WHOAMI", "gyro responds, but wrong ID!");
             //return ESP_ERR_INVALID_VERSION;
@@ -178,11 +206,72 @@ void gyroscope_whoami()
         ESP_LOGE("WHOAMI", "communication with ICM42688 failed");
         //return ESP_ERR_INVALID_RESPONSE;
     }
+    return false;
 }
 
-static bool gyro_is_shaken(int16_t accel_x, int16_t accel_y, int16_t accel_z)
+static bool gyro_is_shaken()
 {
-    return (abs(accel_x) > GYRO_SHAKE_THRESHOLD || abs(accel_y) > GYRO_SHAKE_THRESHOLD || abs(accel_z) > GYRO_SHAKE_THRESHOLD);
+    uint16_t meanX = 0;
+    uint16_t meanY = 0;
+    uint16_t meanZ = 0;
+
+    uint8_t upper_x = gyroscop_read(GYRO_SPI_ACCEL_XOUT_H);
+    uint8_t lower_x = gyroscop_read(GYRO_SPI_ACCEL_XOUT_L);
+    uint16_t x = ((upper_x << 8) | lower_x);
+
+    uint8_t upper_y = gyroscop_read(GYRO_SPI_ACCEL_YOUT_H);
+    uint8_t lower_y = gyroscop_read(GYRO_SPI_ACCEL_YOUT_L);
+    uint16_t y = ((upper_y << 8) | lower_y);
+
+    uint8_t upper_z = gyroscop_read(GYRO_SPI_ACCEL_ZOUT_H);
+    uint8_t lower_z = gyroscop_read(GYRO_SPI_ACCEL_ZOUT_L);
+    uint16_t z = ((upper_z << 8) | lower_z);
+
+    if(meanX == 0 && meanY == 0 && meanZ == 0){
+        meanX = x;
+        meanY = y;
+        meanZ = z;
+    } else {
+        uint16_t tempMeanX = (meanX + x) / 2;
+        uint16_t tempmeanY = (meanY + y) / 2;
+        uint16_t tempmeanZ = (meanZ + z) / 2;
+
+        if(abs(meanX - x) > accel_threshold){
+            changes[curr_change_index] = true;
+        }
+        else if(abs(meanY - y) > accel_threshold){
+            changes[curr_change_index] = true;
+        }
+        else if(abs(meanZ - z) > accel_threshold){
+            changes[curr_change_index] = true;
+        } else {
+            changes[curr_change_index] = false;
+        }
+        curr_change_index = (curr_change_index + 1) % 10;
+
+        meanX = tempMeanX;
+        meanY = tempmeanY;
+        meanZ = tempmeanZ;
+
+        uint8_t count = 0;
+        for (int i = 0; i < 10; i++) {
+            if(changes[i]){
+                count++;
+            }
+        }
+
+        if(count > rolling_threshold){
+            for (int i = 0; i < 10; i++) {
+                changes[i] = false;
+            }
+            meanX = 0;
+            meanY = 0;
+            meanZ = 0;
+            return true;
+        }
+    }
+
+    return false;
 }
 #endif
 
@@ -500,27 +589,31 @@ void app_main(void)
     configure_buttons();
     configure_gyroscope();
 
-    gyroscope_whoami();
+    bool gyroscopeWorking = gyroscope_whoami();
+    if (!gyroscopeWorking) {
+        ESP_LOGE("CONFIGURATION", "Gyroscope configuration failed, exiting...");
+        return;
+    }
+
+    write_register(0x4E, 0x0F);
+    write_register(0x50, 0x00);
 
     ESP_LOGI("CONFIGURATION", "Everything configured, program start...");
 
     while (1)
     {
-        // read_accelerometer_data(&accel_x, &accel_y, &accel_z);
+        if (gyro_is_shaken())
+        {
+            ESP_LOGI("SHAKE", "Sensor is shaken!");
+            do
+            {
+                draw_roll_animation();
+            }
+            while (gyro_is_shaken());
 
-        // if (gyro_is_shaken(accel_x, accel_y, accel_z))
-        // {
-        //     ESP_LOGI("SHAKE", "Sensor is shaken!");
-        //     do
-        //     {
-        //         draw_roll_animation();
-        //         read_accelerometer_data(&accel_x, &accel_y, &accel_z);
-        //     }
-        //     while (gyro_is_shaken(accel_x, accel_y, accel_z));
-
-        //     ESP_LOGI("SHAKE", "Sensor stopped shaking!");
-        //     create_random_number();
-        // }
+            ESP_LOGI("SHAKE", "Sensor stopped shaking!");
+            create_random_number();
+        }
 
         if (gpio_get_level(BUTTON_GPIO_LEFT) == 0)
         {
