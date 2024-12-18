@@ -96,9 +96,11 @@ uint8_t rightarrow[5][5] = {
 
 static void IRAM_ATTR gpio_isr_handler(void* arg) {
     uint32_t gpio_num = (uint32_t) arg;
-    game_status.gpio_num = gpio_num;
-    game_status.winning_condition = winning_condition;
-    button_pressed = true;
+    if (!button_pressed) {
+        game_status.gpio_num = gpio_num;
+        game_status.winning_condition = winning_condition;
+        button_pressed = true;
+    }
 }
 
 static void configure_buttons()
@@ -183,9 +185,8 @@ void wait_both_players_release_button() {
 
 void run_game() {
     ESP_LOGI("Game", "Game started");
+    winning_condition = false;
     button_pressed = false;
-    game_status.gpio_num = 0;
-    game_status.winning_condition = false;
 
     fill_led_strip(50, 0, 0);
 
@@ -227,8 +228,6 @@ void app_main(void)
                     }
                 }
                 game_running = false;
-                winning_condition = false;
-                button_pressed = false;
             }
         } else {
             if (both_players_ready()) {
