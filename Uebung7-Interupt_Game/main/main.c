@@ -67,10 +67,16 @@ static void configure_led(void)
 #error "unsupported LED type"
 #endif
 
+typedef struct {
+    uint32_t gpio_num;
+    bool winning_condition;
+} game_status_t;
+
 bool game_running = false;
 bool winning_condition = false;
 uint8_t max_wait_time_in_seconds = 5;
-uint32_t pressedButton = 0;
+volatile bool button_pressed = false;
+game_status_t game_status = {0, false};
 
 uint8_t leftarrow[5][5] = {
     {0, 0, 1, 0, 0},
@@ -90,7 +96,9 @@ uint8_t rightarrow[5][5] = {
 
 static void IRAM_ATTR gpio_isr_handler(void* arg) {
     uint32_t gpio_num = (uint32_t) arg;
-    pressedButton = gpio_num;
+    game_status.gpio_num = gpio_num;
+    game_status.winning_condition = winning_condition;
+    button_pressed = true;
 }
 
 static void configure_buttons()
@@ -100,7 +108,7 @@ static void configure_buttons()
             .mode = GPIO_MODE_INPUT,
             .pull_up_en = GPIO_PULLUP_ENABLE,
             .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_POSEDGE
+            .intr_type = GPIO_INTR_NEGEDGE
     };
     gpio_config(&gpioConfigIn);
 
@@ -154,10 +162,31 @@ bool both_players_ready() {
     return false;
 }
 
+void wait_both_players_release_button() {
+    uint32_t left = gpio_get_level(BUTTON_GPIO_LEFT);
+    uint32_t right = gpio_get_level(BUTTON_GPIO_RIGHT);
+
+    while (left == 0 || right == 0) {
+        if (left == 0 && right == 0) {
+            ESP_LOGD("Game", "Waiting for both players to release button");
+        } else if (left != 0 && right == 0) {
+            ESP_LOGD("Game", "Waiting for right player to release button");
+        } else if (left == 0 && right != 0) {
+            ESP_LOGD("Game", "Waiting for left player to release button");
+        }
+
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+        left = gpio_get_level(BUTTON_GPIO_LEFT);
+        right = gpio_get_level(BUTTON_GPIO_RIGHT);
+    }
+}
+
 void run_game() {
     ESP_LOGI("Game", "Game started");
+    button_pressed = false;
+    game_status.gpio_num = 0;
+    game_status.winning_condition = false;
 
-    pressedButton = 0;
     fill_led_strip(50, 0, 0);
 
     uint8_t time = (esp_random() % max_wait_time_in_seconds);
@@ -165,8 +194,11 @@ void run_game() {
     game_running = true;
     vTaskDelay(time * 1000 / portTICK_PERIOD_MS);
 
-    winning_condition = true;
-    fill_led_strip(0, 50, 0);
+    // Only create winning condition if no player, pressed to early
+    if (!button_pressed) {
+        winning_condition = true;
+        fill_led_strip(0, 50, 0);
+    }
 }
 
 void app_main(void)
@@ -176,34 +208,33 @@ void app_main(void)
 
     ESP_LOGI("Debug", "Everything configured, program start...");
 
-    while (true)
-    {
-        if (both_players_ready())
-        {
-            run_game();
-        }
-
-        if (game_running)
-        {
-            if (pressedButton == BUTTON_GPIO_LEFT) {
-                if (winning_condition) {
-                    draw_picture(leftarrow, 0, 50, 0);
+    while (true) {
+        if (game_running) {
+            if (button_pressed){
+                if (game_status.winning_condition) {
+                    // Game is running and timer has finished
+                    if (game_status.gpio_num == BUTTON_GPIO_LEFT) {
+                        draw_picture(leftarrow, 0, 50, 0);
+                    } else if (game_status.gpio_num == BUTTON_GPIO_RIGHT) {
+                        draw_picture(rightarrow, 0, 50, 0);
+                    }
                 } else {
-                    draw_picture(leftarrow, 50, 0, 0);
+                    // A player pressed the button too early
+                    if (game_status.gpio_num == BUTTON_GPIO_LEFT) {
+                        draw_picture(leftarrow, 50, 0, 0);
+                    } else if (game_status.gpio_num == BUTTON_GPIO_RIGHT) {
+                        draw_picture(rightarrow, 50, 0, 0);
+                    }
                 }
-            } else if (pressedButton == BUTTON_GPIO_RIGHT) {
-                if (winning_condition) {
-                    draw_picture(rightarrow, 0, 50, 0);
-                } else {
-                    draw_picture(rightarrow, 50, 0, 0);
-                }
-            }
-
-            if (pressedButton != 0)
-            {
                 game_running = false;
                 winning_condition = false;
-                pressedButton = 0;
+                button_pressed = false;
+            }
+        } else {
+            if (both_players_ready()) {
+                wait_both_players_release_button();
+
+                run_game();
             }
         }
 
